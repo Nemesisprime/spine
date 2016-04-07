@@ -21,7 +21,20 @@ describe("Controller", function(){
     expect(users.el).toBeTruthy();
   });
 
-  it("can populate elements", function(){
+  it("can replace generated element", function(){
+    element.addClass('new').html('before');
+    var users = new Users({el: element});
+    expect(users.el.hasClass('new')).toBeTruthy();
+    expect(users.el.html()).toBe('before');
+    //expect(users.$el.html()).toBe('before');
+    var newElement = $('<div class="newer">replaced</div>');
+    users.replace(newElement);
+    expect(users.el.hasClass('newer')).toBeTruthy();
+    expect(users.el.html()).toBe('replaced');
+    //expect(users.$el.html()).toBe('replaced');
+  });
+
+  it("should populate elements", function(){
     Users.include({
       elements: {".foo": "foo"}
     });
@@ -33,7 +46,7 @@ describe("Controller", function(){
     expect(users.foo.hasClass("foo")).toBeTruthy();
   });
 
-  it("can remove element upon release event", function(){
+  it("should remove element upon release event", function(){
     var parent = $('<div />');
     parent.append(element);
 
@@ -43,25 +56,23 @@ describe("Controller", function(){
     users.release();
     expect(parent.children().length).toBe(0);
   });
-  
-  it("can set attributes on el", function(){
+
+  it("should set attributes on el", function(){
     Users.include({
       attributes: {"style": "width: 100%"}
     });
     var users = new Users();
-    expect(users.el.attr("style")).toEqual("width: 100%");
+    expect(users.el.attr("style")).toMatch("width: 100%");
   });
 
-  describe("can bind DOM events", function(){
+  describe("When binding DOM events", function(){
     var spy;
-    
+
     beforeEach(function(){
-      var noop = {spy: function(){}};
-      spyOn(noop, "spy");
-      spy = noop.spy;
+      spy = jasmine.createSpy();
     });
-    
-    it("can add events", function(){
+
+    it("should add events", function(){
       Users.include({
         events: {"click": "wasClicked"},
         // Context change confuses Spy
@@ -71,8 +82,8 @@ describe("Controller", function(){
       element.click();
       expect(spy).toHaveBeenCalled();
     });
-    
-    it("can delegate events", function(){
+
+    it("should delegate events", function(){
       Users.include({
         events: {"click .foo": "wasClicked"},
         wasClicked: $.proxy(spy, jasmine)
@@ -84,32 +95,29 @@ describe("Controller", function(){
       expect(spy).toHaveBeenCalled();
     });
   });
-  
+
   /*
     tests related to .listenTo(), .listenToOnce(), and .stopListening()
   */
-  
-  describe("Events listeners methods", function(){
+
+  describe("When using event listener methods", function(){
     var spy, spy2, Asset, Users, asset, users;
-    
+
     beforeEach(function(){
       Asset = Spine.Model.setup("Asset", ["name"]);
       asset = Asset.create({name: "test.pdf"});
       Users = Spine.Controller.sub();
       users = new Users();
-      var noop = {spy: function(){}, spy2: function(){}};
-      spyOn(noop, "spy");
-      spyOn(noop, "spy2");
-      spy = noop.spy;
-      spy2 = noop.spy2;
+      spy = jasmine.createSpy();
+      spy2 = jasmine.createSpy();
     });
-    
+
     it("can listen to one event on a model instance", function(){
       users.listenTo(asset, 'event1', spy);
       asset.trigger("event1");
       expect(spy).toHaveBeenCalled();
     });
-    
+
     it("wont listen to events of the same name on unlistened to model instances", function(){
       users.listenTo(asset, 'event1', spy);
       var asset2 = Asset.create({name: "scooby.pdf"});
@@ -118,77 +126,138 @@ describe("Controller", function(){
       asset2.trigger("evemt1")
       expect(spy).not.toHaveBeenCalled();
     });
-    
+
     it("can listen to many events on a model instance", function(){
       users.listenTo(asset, 'event1 event2 event3', spy);
       asset.trigger("event1");
       asset.trigger("event2");
       asset.trigger("event3");
       expect(spy).toHaveBeenCalled();
-      expect(spy.callCount).toBe(3);
+      expect(spy.calls.count()).toBe(3);
     });
-    
+
     it("can listen once for an event on a model instance", function(){
       users.listenToOnce(asset, 'event1', spy);
       asset.trigger("event1");
       expect(spy).toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       asset.trigger("event1");
       expect(spy).not.toHaveBeenCalled();
     });
-    
+
     it("can stop listening to a specific event on a model instance while maintaining listeners on other events", function(){
       users.listenTo(asset, 'event1 event2 event3', spy);
       asset.trigger("event1");
       expect(spy).toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       users.stopListening(asset, 'event1');
       asset.trigger("event1");
       expect(spy).not.toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       asset.trigger("event2");
       expect(spy).toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       asset.trigger("event3");
       expect(spy).toHaveBeenCalled();
     });
-    
+
     it("can stop listening to all events on a model instance", function(){
       users.listenTo(asset, 'event1 event2 event3', spy);
       asset.trigger("event2");
       expect(spy).toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       users.stopListening(asset);
       asset.trigger("event1");
       asset.trigger("event2");
       asset.trigger("event3");
       expect(spy).not.toHaveBeenCalled();
     });
-    
-    it("can stop listening to events on a model instance, without canceling out other binders on that model instance", function(){
+
+    it("should stop listening to events on a model instance, without canceling out other binders on that model instance", function(){
       Asset.bind('event1', spy2)
       users.listenTo(asset, 'event1', spy);
       asset.trigger("event1");
       expect(spy).toHaveBeenCalled();
       expect(spy2).toHaveBeenCalled();
-      spy.reset();
-      spy2.reset();
+      spy.calls.reset();
+      spy2.calls.reset();
       users.stopListening(asset, 'event1');
       asset.trigger("event1");
       expect(spy).not.toHaveBeenCalled();
       expect(spy2).toHaveBeenCalled();
     });
-    
+
     // this is the major benefit of the listeners. helps manage cleanup of obsolete binders
-    
-    it("will stop listening if the controller is released", function(){
+
+    it("should stop listening if the controller is released", function(){
       users.listenTo(asset, 'event1', spy);
       asset.trigger("event1");
       expect(spy).toHaveBeenCalled();
-      spy.reset();
+      spy.calls.reset();
       users.release();
       asset.trigger("event1");
       expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("should stop listening to events on a model instance if the controller is released, without canceling out other binders on that model instance", function(){
+      asset.bind('event1', spy2)
+      users.listenTo(asset, 'event1', spy);
+      asset.trigger("event1");
+      expect(spy).toHaveBeenCalled();
+      expect(spy2).toHaveBeenCalled();
+      spy.calls.reset();
+      spy2.calls.reset();
+      users.release();
+      asset.trigger("event1");
+      expect(spy).not.toHaveBeenCalled();
+      expect(spy2).toHaveBeenCalled();
+    });
+
+  });
+
+  describe("When using inheritance", function() {
+    beforeEach(function() {
+      element = $('<div/>').html('<div class="a-el"></div><div class="b-el"></div><div class="c-el"></div>');
+      A = Spine.Controller.sub({
+        events: {"click .a-el": "aEventHandler"},
+        elements: {".a-el": "elA"},
+        aEventHandler: function() {}
+      });
+
+      B = A.sub({
+        el: element,
+        events: {"click .b-el": "bEventHandler"},
+        elements: {".b-el": "elB"},
+        bEventHandler: function() {}
+      });
+
+      C = B.sub({
+        el: element,
+        events: {"click .c-el": "cEventHandler"},
+        elements: {".c-el": "elC"},
+        cEventHandler: function() {}
+      });
+
+      c = new C();
+    });
+
+    it("should inherit elements from parent controllers", function(){
+      expect(c.elA).toBeDefined();
+      expect(c.elB).toBeDefined();
+      expect(c.elC).toBeDefined();
+    });
+
+    it("should inherit events from parent controllers", function(){
+      spyOn(c, 'aEventHandler');
+      spyOn(c, 'bEventHandler');
+      spyOn(c, 'cEventHandler');
+      c.el.find('.a-el').click();
+      c.el.find('.b-el').click();
+      c.el.find('.c-el').click();
+
+      expect(c.aEventHandler).toHaveBeenCalled();
+      expect(c.bEventHandler).toHaveBeenCalled();
+      expect(c.cEventHandler).toHaveBeenCalled();
     });
   });
 });

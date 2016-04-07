@@ -5,7 +5,40 @@ Queue  = $({})
 
 Ajax =
   getURL: (object) ->
-    object and object.url?() or object.url
+    if object.className?
+      @generateURL(object)
+    else
+      @generateURL(object, encodeURIComponent(object.id))
+
+  getCollectionURL: (object) ->
+    @generateURL(object)
+
+  getScope: (object) ->
+    object.scope?() or object.scope
+
+  getCollection: (object) ->
+    if object.url isnt object.generateURL
+      if typeof object.url is 'function'
+        object.url()
+      else
+        object.url
+    else if object.className?
+      object.className.toLowerCase() + 's'
+
+  generateURL: (object, args...) ->
+    collection = Ajax.getCollection(object) or Ajax.getCollection(object.constructor)
+    scope = Ajax.getScope(object) or Ajax.getScope(object.constructor)
+    args.unshift(collection)
+    args.unshift(scope)
+    # construct and clean url
+    path = args.join('/')
+    path = path.replace /(\/\/)/g, "/"
+    path = path.replace /^\/|\/$/g, ""
+    # handle relative urls vs those that use a host
+    if path.indexOf("../") isnt 0
+      Model.host + "/" + path
+    else
+      path
 
   enabled: true
 
@@ -27,6 +60,12 @@ Ajax =
   clearQueue: ->
     @queue []
 
+  config:
+    loadMethod: 'GET'
+    updateMethod: 'PUT'
+    createMethod: 'POST'
+    destroyMethod: 'DELETE'
+
 class Base
   defaults:
     dataType: 'json'
@@ -38,26 +77,39 @@ class Base
   ajax: (params, defaults) ->
     $.ajax @ajaxSettings(params, defaults)
 
-  ajaxQueue: (params, defaults) ->
+  ajaxQueue: (params, defaults, record) ->
     jqXHR    = null
     deferred = $.Deferred()
-
     promise  = deferred.promise()
     return promise unless Ajax.enabled
-
     settings = @ajaxSettings(params, defaults)
-
+    # prefer setting if exists else default is to parallelize 'GET' requests
+    parallel = if settings.parallel isnt undefined then settings.parallel else (settings.type is 'GET')
     request = (next) ->
+      if record?.id?
+        # for existing singleton, model id may have been updated
+        # after request has been queued
+        settings.url ?= Ajax.getURL(record)
+        settings.data?.id = record.id
+      # 2 reasons not to stringify: if already a string, or if intend to have ajax processData
+      if typeof settings.data isnt 'string' and settings.processData isnt true
+        settings.data = JSON.stringify(settings.data)
+      # enable promise callbacks to access the request's settings object
+      resolve = ->
+        deferred.resolve.apply this, [arguments..., settings]
+      reject = ->
+        deferred.reject.apply this, [arguments..., settings]
       jqXHR = $.ajax(settings)
-                .done(deferred.resolve)
-                .fail(deferred.reject)
-                .then(next, next)
+      jqXHR.done(resolve)
+      jqXHR.fail(reject)
+      jqXHR.then(next, next)
+      if parallel
+        Queue.dequeue()
 
     promise.abort = (statusText) ->
       return jqXHR.abort(statusText) if jqXHR
       index = $.inArray(request, @queue())
       @queue().splice(index, 1) if index > -1
-
       deferred.rejectWith(
         settings.context or settings,
         [promise, statusText, '']
@@ -73,134 +125,148 @@ class Base
 class Collection extends Base
   constructor: (@model) ->
 
-  find: (id, params) ->
+  find: (id, params, options = {}) ->
     record = new @model(id: id)
     @ajaxQueue(
-      params,
-      type: 'GET',
-      url:  Ajax.getURL(record)
-    ).done(@recordsResponse)
-     .fail(@failResponse)
+      params, {
+        type: options.method or Ajax.config.loadMethod
+        url: options.url or Ajax.getURL(record)
+        parallel: options.parallel
+      }
+    ).done(@recordsResponse(options))
+      .fail(@failResponse(options))
 
-  all: (params) ->
+  all: (params, options = {}) ->
     @ajaxQueue(
-      params,
-      type: 'GET',
-      url:  Ajax.getURL(@model)
-    ).done(@recordsResponse)
-     .fail(@failResponse)
+      params, {
+        type: options.method or Ajax.config.loadMethod
+        url: options.url or Ajax.getURL(@model)
+        parallel: options.parallel
+      }
+    ).done(@recordsResponse(options))
+      .fail(@failResponse(options))
 
   fetch: (params = {}, options = {}) ->
     if id = params.id
       delete params.id
-      @find(id, params).done (record) =>
+      @find(id, params, options).done (record) =>
         @model.refresh(record, options)
     else
-      @all(params).done (records) =>
+      @all(params, options).done (records) =>
         @model.refresh(records, options)
 
   # Private
 
-  recordsResponse: (data, status, xhr) =>
-    @model.trigger('ajaxSuccess', null, status, xhr)
+  recordsResponse: (options) =>
+    (data, status, xhr, settings) =>
+      @model.trigger('ajaxSuccess', null, status, xhr, settings)
+      options.done?.call(@model, settings)
 
-  failResponse: (xhr, statusText, error) =>
-    @model.trigger('ajaxError', null, xhr, statusText, error)
+  failResponse: (options) =>
+    (xhr, statusText, error, settings) =>
+      @model.trigger('ajaxError', null, xhr, statusText, error, settings)
+      options.fail?.call(@model, settings)
 
 class Singleton extends Base
   constructor: (@record) ->
     @model = @record.constructor
 
-  reload: (params, options) ->
+  reload: (params, options = {}) ->
     @ajaxQueue(
-      params,
-      type: 'GET'
-      url:  Ajax.getURL(@record)
+      params, {
+        type: options.method or Ajax.config.loadMethod
+        url: options.url
+        parallel: options.parallel
+      }, @record
     ).done(@recordResponse(options))
-     .fail(@failResponse(options))
+      .fail(@failResponse(options))
 
-  create: (params, options) ->
+  create: (params, options = {}) ->
     @ajaxQueue(
-      params,
-      type: 'POST'
-      contentType: 'application/json'
-      data: JSON.stringify(@record)
-      url:  Ajax.getURL(@model)
+      params, {
+        type: options.method or Ajax.config.createMethod
+        contentType: 'application/json'
+        data: @record.toJSON()
+        url: options.url or Ajax.getCollectionURL(@record)
+        parallel: options.parallel
+      }
     ).done(@recordResponse(options))
-     .fail(@failResponse(options))
+      .fail(@failResponse(options))
 
-  update: (params, options) ->
+  update: (params, options = {}) ->
     @ajaxQueue(
-      params,
-      type: 'PUT'
-      contentType: 'application/json'
-      data: JSON.stringify(@record)
-      url:  Ajax.getURL(@record)
+      params, {
+        type: options.method or Ajax.config.updateMethod
+        contentType: 'application/json'
+        data: @record.toJSON()
+        url: options.url
+        parallel: options.parallel
+      }, @record
     ).done(@recordResponse(options))
-     .fail(@failResponse(options))
+      .fail(@failResponse(options))
 
-  destroy: (params, options) ->
+  destroy: (params, options = {}) ->
     @ajaxQueue(
-      params,
-      type: 'DELETE'
-      url:  Ajax.getURL(@record)
+      params, {
+        type: options.method or Ajax.config.destroyMethod
+        url: options.url
+        parallel: options.parallel
+      }, @record
     ).done(@recordResponse(options))
-     .fail(@failResponse(options))
+      .fail(@failResponse(options))
 
   # Private
 
-  recordResponse: (options = {}) =>
-    (data, status, xhr) =>
-      if Spine.isBlank(data) or @record.destroyed
-        data = false
-      else
-        data = @model.fromJSON(data)
+  recordResponse: (options) =>
+    (data, status, xhr, settings) =>
+      if data? and Object.getOwnPropertyNames(data).length and not @record.destroyed
+        @record.refresh(data, ajax: false)
+      @record.trigger('ajaxSuccess', @record, @model.fromJSON(data), status, xhr, settings)
+      options.done?.call(@record, settings)
 
-      Ajax.disable =>
-        if data
-          # ID change, need to do some shifting
-          if data.id and @record.id isnt data.id
-            @record.changeID(data.id)
+  failResponse: (options) =>
+    (xhr, statusText, error, settings) =>
+      switch settings.type
+        when 'POST' then @createFailed()
+        when 'DELETE' then @destroyFailed()
+      @record.trigger('ajaxError', @record, xhr, statusText, error, settings)
+      options.fail?.call(@record, settings)
 
-          # Update with latest data
-          @record.updateAttributes(data.attributes())
+  createFailed: ->
+    @record.remove(clear: true)
 
-      @record.trigger('ajaxSuccess', data, status, xhr)
-      options.success?.apply(@record) # Deprecated
-      options.done?.apply(@record)
-
-  failResponse: (options = {}) =>
-    (xhr, statusText, error) =>
-      @record.trigger('ajaxError', xhr, statusText, error)
-      options.error?.apply(@record) # Deprecated
-      options.fail?.apply(@record)
+  destroyFailed: ->
+    @record.destroyed = false
+    @record.constructor.refresh(@record)
 
 # Ajax endpoint
 Model.host = ''
 
+GenerateURL =
+  include: (args...) ->
+    args.unshift(encodeURIComponent(@id))
+    Ajax.generateURL(this, args...)
+  extend: (args...) ->
+    Ajax.generateURL(this, args...)
+
 Include =
   ajax: -> new Singleton(this)
 
-  url: (args...) ->
-    url = Ajax.getURL(@constructor)
-    url += '/' unless url.charAt(url.length - 1) is '/'
-    url += encodeURIComponent(@id)
-    args.unshift(url)
-    args.join('/')
+  generateURL: GenerateURL.include
+
+  url: GenerateURL.include
 
 Extend =
   ajax: -> new Collection(this)
 
-  url: (args...) ->
-    args.unshift(@className.toLowerCase() + 's')
-    args.unshift(Model.host)
-    args.join('/')
+  generateURL: GenerateURL.extend
+
+  url: GenerateURL.extend
 
 Model.Ajax =
   extended: ->
     @fetch @ajaxFetch
     @change @ajaxChange
-
     @extend Extend
     @include Include
 
@@ -211,7 +277,7 @@ Model.Ajax =
 
   ajaxChange: (record, type, options = {}) ->
     return if options.ajax is false
-    record.ajax()[type](options.ajax, options)
+    record.ajax()[type]?(options.ajax, options)
 
 Model.Ajax.Methods =
   extended: ->
@@ -220,5 +286,8 @@ Model.Ajax.Methods =
 
 # Globals
 Ajax.defaults   = Base::defaults
+Ajax.Base       = Base
+Ajax.Singleton  = Singleton
+Ajax.Collection = Collection
 Spine.Ajax      = Ajax
 module?.exports = Ajax

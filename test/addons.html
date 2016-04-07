@@ -2,23 +2,27 @@
 <html>
 <head>
   <meta charset="utf8" />
-  <title>Spine Test Runner</title>
+  <title>Spine AddOns Test Runner</title>
   <link rel="stylesheet" type="text/css" href="../node_modules/jasmine-core/lib/jasmine-core/jasmine.css">
   <link rel="stylesheet" type="text/css" href="lib/spineTest.css">
   <script src="../node_modules/jasmine-core/lib/jasmine-core/jasmine.js"></script>
   <script src="../node_modules/jasmine-core/lib/jasmine-core/jasmine-html.js"></script>
   <script src="../node_modules/jasmine-core/lib/jasmine-core/boot.js"></script>
+  <script src="../node_modules/jasmine-ajax/lib/mock-ajax.js"></script>
   <script src="lib/dynamicLoader.js"></script>
   <!--  <script src="lib/jquery.js" charset="utf-8"></script>-->
   <script src="../lib/spine.js" charset="utf-8"></script>
-  <script src="../lib/local.js" charset="utf-8"></script>
+  <script src="../lib/ajax.js" charset="utf-8"></script>
+  <script src="../lib/relation.js" charset="utf-8"></script>
+  <script src="../lib/bindings.js" charset="utf-8"></script>
+  <script src="../lib/route.js" charset="utf-8"></script>
+  <script src="../lib/manager.js" charset="utf-8"></script>
 
-  <script src="specs/class.js" charset="utf-8"></script>
-  <script src="specs/events.js" charset="utf-8"></script>
-  <script src="specs/model.js" charset="utf-8"></script>
-  <script src="specs/model.local.js" charset="utf-8"></script>
-  <script src="specs/controller.js" charset="utf-8"></script>
-
+  <script src="specs/manager.js" charset="utf-8"></script>
+  <script src="specs/route.js" charset="utf-8"></script>
+  <script src="specs/bindings.js" charset="utf-8"></script>
+  <script src="specs/model.relation.js" charset="utf-8"></script>
+  <script src="specs/ajax.js" charset="utf-8"></script>
 </head>
 <body>
   <div id="testHelpers">
